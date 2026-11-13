@@ -57,11 +57,8 @@ def fetch_trending_topic(existing_titles):
     return None
 
 def generate_high_cpm_article(topic_data):
-    """Uses Gemini API to create a structured, original, AdSense-safe HTML article."""
-    client = genai.Client(
-        api_key=GEMINI_API_KEY,
-        http_options=types.HttpOptions(api_version="v1beta")
-    )
+    """Uses Gemini API with automatic model fallback so it never breaks on model updates."""
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
     prompt = f"""
     You are an expert US Financial and Enterprise Tech Analyst.
@@ -78,15 +75,32 @@ def generate_high_cpm_article(topic_data):
     }}
     """
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.7
-        )
-    )
-    return json.loads(response.text)
+    models_to_try = [
+        "gemini-2.0-flash",
+        "gemini-flash-latest",
+        "gemini-2.5-flash-lite",
+        "gemini-3-flash-preview",
+        "gemini-3.0-flash"
+    ]
+
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            print(f"Trying model: {model_name}...")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.7
+                )
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            print(f"Model {model_name} unavailable, trying next...")
+            last_error = e
+
+    raise last_error
 
 def main():
     service = get_blogger_service()
