@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import random
 import feedparser
@@ -56,9 +57,30 @@ def fetch_trending_topic(existing_titles):
             }
     return None
 
+def parse_json_safely(raw_text):
+    """Strips markdown fences if present and parses JSON."""
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text.strip(), flags=re.MULTILINE)
+    return json.loads(cleaned)
+
 def generate_high_cpm_article(topic_data):
-    """Uses Gemini API with automatic model fallback so it never breaks on model updates."""
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    """Automatically discovers available Gemini models on your API key and generates the post."""
+    client = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options=types.HttpOptions(api_version="v1beta")
+    )
+
+    # Dynamically query the API for all Gemini text-generation models enabled for this key
+    available_models = []
+    for m in client.models.list():
+        name = m.name.replace("models/", "")
+        actions = getattr(m, "supported_actions", []) or []
+        if "gemini" in name and "embedding" not in name and "imagen" not in name and "veo" not in name:
+            if not actions or "generateContent" in actions:
+                available_models.append(name)
+
+    # Prioritize fast Flash/Pro models first
+    available_models.sort(key=lambda x: (0 if "flash" in x else 1, x), reverse=True)
+    print(f"Detected available models for your key: {available_models[:6]}")
 
     prompt = f"""
     You are an expert US Financial and Enterprise Tech Analyst.
@@ -75,18 +97,10 @@ def generate_high_cpm_article(topic_data):
     }}
     """
 
-    models_to_try = [
-        "gemini-2.0-flash",
-        "gemini-flash-latest",
-        "gemini-2.5-flash-lite",
-        "gemini-3-flash-preview",
-        "gemini-3.0-flash"
-    ]
-
     last_error = None
-    for model_name in models_to_try:
+    for model_name in available_models:
         try:
-            print(f"Trying model: {model_name}...")
+            print(f"Generating article with {model_name}...")
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
@@ -95,9 +109,9 @@ def generate_high_cpm_article(topic_data):
                     temperature=0.7
                 )
             )
-            return json.loads(response.text)
+            return parse_json_safely(response.text)
         except Exception as e:
-            print(f"Model {model_name} unavailable, trying next...")
+            print(f"Skipped {model_name}: {e}")
             last_error = e
 
     raise last_error
