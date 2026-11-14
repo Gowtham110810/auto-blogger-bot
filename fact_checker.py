@@ -1,20 +1,11 @@
-import os
-import re
 import json
 import sqlite3
 from datetime import datetime, timezone
-from google import genai
-from google.genai import types
+from topic_engine import generate_json_with_fallback
 
 DB_PATH = "keepupdatedtrend.db"
 
 def verify_and_refine_article(article_data, research_pack, queue_id=0):
-    """Audits article claims against the research pack and removes unsupported numbers."""
-    client = genai.Client(
-        api_key=os.environ["GEMINI_API_KEY"],
-        http_options=types.HttpOptions(api_version="v1beta")
-    )
-
     prompt = f"""
     You are the Managing Fact-Checker & Publication Gatekeeper for KeepUpdatedTrend.
     Audit this drafted article JSON against the collected Research Pack.
@@ -31,18 +22,8 @@ def verify_and_refine_article(article_data, research_pack, queue_id=0):
     3. Return the corrected article JSON in the exact same schema, plus a top-level boolean `"gate_passed": true` and `"verified_references"` containing 3-4 clean source objects (`{{"title": "...", "source": "...", "url": "..."}}`).
     """
 
-    resp = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.15
-        )
-    )
-    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", resp.text.strip(), flags=re.MULTILINE)
-    verified_data = json.loads(cleaned)
+    verified_data = generate_json_with_fallback(prompt, temperature=0.15)
 
-    # Mark claims as verified in SQLite
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     now = datetime.now(timezone.utc).isoformat()
@@ -58,7 +39,6 @@ def verify_and_refine_article(article_data, research_pack, queue_id=0):
     return verified_data
 
 def render_references_html(verified_data):
-    """Renders an authoritative external references card for on-page SEO and reader trust."""
     refs = verified_data.get("verified_references", [])
     if not refs:
         return ""
