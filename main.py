@@ -15,11 +15,23 @@ CLIENT_ID = os.environ["BLOGGER_CLIENT_ID"]
 CLIENT_SECRET = os.environ["BLOGGER_CLIENT_SECRET"]
 REFRESH_TOKEN = os.environ["BLOGGER_REFRESH_TOKEN"]
 
-# High-CPM US Tier-1 Google News RSS Feeds (Finance, AI, Cloud/SaaS, Investing)
+# Unified High-CPM US Tier-1 Feeds (Enterprise AI, FinTech, Markets, Cloud SaaS)
 US_HIGH_CPM_FEEDS = [
     "https://news.google.com/rss/search?q=AI+Enterprise+Software+SaaS+when:1d&hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss/search?q=Personal+Finance+ETF+Investing+Market+when:1d&hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss/search?q=Cloud+Computing+Cybersecurity+Tech+when:1d&hl=en-US&gl=US&ceid=US:en"
+    "https://news.google.com/rss/search?q=S%26P+500+ETF+Institutional+Investing+Market+when:1d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=Cloud+Infrastructure+Cybersecurity+FinTech+when:1d&hl=en-US&gl=US&ceid=US:en"
+]
+
+# Curated high-resolution editorial finance & tech cover images
+EDITORIAL_COVERS = [
+    "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=1200&q=80",
+    "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=80",
+    "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1200&q=80",
+    "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1200&q=80",
+    "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=1200&q=80",
+    "https://images.unsplash.com/photo-1504868584819-f8e8b4b6d7e3?auto=format&fit=crop&w=1200&q=80",
+    "https://images.unsplash.com/photo-1642543492481-44e81e3914a7?auto=format&fit=crop&w=1200&q=80",
+    "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=1200&q=80"
 ]
 
 def get_blogger_service():
@@ -37,7 +49,7 @@ def get_blogger_service():
 def get_existing_titles(service):
     """Fetches recent blog post titles to avoid publishing duplicates."""
     try:
-        posts = service.posts().list(blogId=BLOG_ID, maxResults=25).execute()
+        posts = service.posts().list(blogId=BLOG_ID, maxResults=30).execute()
         return [item["title"].lower() for item in posts.get("items", [])]
     except Exception:
         return []
@@ -47,7 +59,7 @@ def fetch_trending_topic(existing_titles):
     feed_url = random.choice(US_HIGH_CPM_FEEDS)
     feed = feedparser.parse(feed_url)
     
-    for entry in feed.entries[:10]:
+    for entry in feed.entries[:12]:
         clean_title = entry.title.rsplit(" - ", 1)[0]
         if not any(clean_title[:25].lower() in t for t in existing_titles):
             return {
@@ -62,14 +74,13 @@ def parse_json_safely(raw_text):
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text.strip(), flags=re.MULTILINE)
     return json.loads(cleaned)
 
-def generate_high_cpm_article(topic_data):
-    """Automatically discovers available Gemini models on your API key and generates the post."""
+def generate_structured_article(topic_data):
+    """Generates structured JSON data so Python can assemble a uniform, mobile-responsive layout."""
     client = genai.Client(
         api_key=GEMINI_API_KEY,
         http_options=types.HttpOptions(api_version="v1beta")
     )
 
-    # Dynamically query the API for all Gemini text-generation models enabled for this key
     available_models = []
     for m in client.models.list():
         name = m.name.replace("models/", "")
@@ -78,35 +89,67 @@ def generate_high_cpm_article(topic_data):
             if not actions or "generateContent" in actions:
                 available_models.append(name)
 
-    # Prioritize fast Flash/Pro models first
     available_models.sort(key=lambda x: (0 if "flash" in x else 1, x), reverse=True)
-    print(f"Detected available models for your key: {available_models[:6]}")
 
     prompt = f"""
-    You are an expert US Financial and Enterprise Tech Analyst.
+    You are a Senior US Institutional Finance & Enterprise Tech Editor.
     Based on this trending catalyst: "{topic_data['headline']}"
-    
-    Write an original, comprehensive, 1,000-word analytical guide tailored for a US/UK audience.
-    Do NOT just summarize the news—provide deep actionable frameworks, financial/technical implications, and comparisons.
 
-    Return ONLY a raw JSON object (no markdown formatting or backticks) with these exact keys:
+    Produce a strictly disciplined, analytical guide (~1,000 words) for a US/UK executive and investor audience.
+    Return ONLY a raw JSON object with this exact schema:
     {{
-      "seo_title": "Click-worthy, SEO-optimized title (under 65 chars, different from original headline)",
+      "seo_title": "Clear, authoritative title under 64 characters",
+      "category_badge": "One of: ENTERPRISE AI | MARKET STRATEGY | CLOUD & SAAS | FINTECH ANALYSIS",
       "labels": ["Tag1", "Tag2", "Tag3"],
-      "html_content": "Full HTML body using ONLY <h2>, <h3>, <p>, <ul>, <li>, <strong>, and a styled <table> comparing key metrics/options, followed by a 4-question FAQ section."
+      "executive_takeaways": [
+        "Takeaway 1 (1 concise sentence with a concrete metric or mechanism)",
+        "Takeaway 2 (1 concise sentence)",
+        "Takeaway 3 (1 concise sentence)"
+      ],
+      "intro_paragraph": "Strong 2-paragraph opening establishing the market catalyst and why it matters now (plain text, separated by \\n\\n).",
+      "sections": [
+        {{
+          "heading": "1. Core Catalyst & Market Mechanics",
+          "body_html": "<p>Detailed analysis...</p><p>Second paragraph...</p>"
+        }},
+        {{
+          "heading": "2. Financial & Operational Implications",
+          "body_html": "<p>Detailed analysis...</p><ul><li><strong>Key Factor:</strong> Explanation...</li><li><strong>Risk Vector:</strong> Explanation...</li></ul>"
+        }},
+        {{
+          "heading": "3. Strategic Implementation Framework",
+          "body_html": "<p>Step-by-step actionable blueprint for decision-makers...</p>"
+        }}
+      ],
+      "table": {{
+        "caption": "Comparative Benchmark & Metric Breakdown",
+        "headers": ["Metric / Option", "Baseline / Legacy", "Modern / Optimized", "Primary Impact"],
+        "rows": [
+          ["Row 1 Col 1", "Row 1 Col 2", "Row 1 Col 3", "Row 1 Col 4"],
+          ["Row 2 Col 1", "Row 2 Col 2", "Row 2 Col 3", "Row 2 Col 4"],
+          ["Row 3 Col 1", "Row 3 Col 2", "Row 3 Col 3", "Row 3 Col 4"],
+          ["Row 4 Col 1", "Row 4 Col 2", "Row 4 Col 3", "Row 4 Col 4"]
+        ]
+      }},
+      "faqs": [
+        {{"q": "Specific high-intent question 1?", "a": "Direct, authoritative 2-3 sentence answer."}},
+        {{"q": "Specific high-intent question 2?", "a": "Direct, authoritative 2-3 sentence answer."}},
+        {{"q": "Specific high-intent question 3?", "a": "Direct, authoritative 2-3 sentence answer."}},
+        {{"q": "Specific high-intent question 4?", "a": "Direct, authoritative 2-3 sentence answer."}}
+      ]
     }}
     """
 
     last_error = None
     for model_name in available_models:
         try:
-            print(f"Generating article with {model_name}...")
+            print(f"Generating structured article with {model_name}...")
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    temperature=0.7
+                    temperature=0.6
                 )
             )
             return parse_json_safely(response.text)
@@ -115,6 +158,101 @@ def generate_high_cpm_article(topic_data):
             last_error = e
 
     raise last_error
+
+def render_responsive_html(data):
+    """Wraps the structured JSON into a uniform, mobile-first and desktop-optimized HTML template."""
+    img_url = random.choice(EDITORIAL_COVERS)
+    safe_alt = data["seo_title"].replace('"', '&quot;')
+    badge = data.get("category_badge", "MARKET ANALYSIS")
+
+    # 1. Outer Responsive Wrapper (works identically on mobile & desktop)
+    html = [
+        '<div style="max-width: 820px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; line-height: 1.75; font-size: 16px; box-sizing: border-box;">'
+    ]
+
+    # 2. Category Pill Badge
+    html.append(
+        f'<div style="margin-bottom: 12px;">'
+        f'<span style="display: inline-block; background: #0f172a; color: #38bdf8; font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 5px 12px; border-radius: 6px;">{badge}</span>'
+        f'</div>'
+    )
+
+    # 3. Featured Cover Image (Blogger auto-detects this first <img> as the post thumbnail)
+    html.append(
+        f'<div class="separator" style="clear: both; text-align: center; margin-bottom: 24px;">'
+        f'<a href="{img_url}" imageanchor="1" style=" display: block;">'
+        f'<img border="0" src="{img_url}" alt="{safe_alt}" title="{safe_alt}" '
+        f'style="width: 100%; max-width: 820px; height: auto; max-height: 420px; object-fit: cover; border-radius: 12px; box-shadow: 0 6px 18px rgba(15,23,42,0.12);" />'
+        f'</a></div>'
+    )
+
+    # 4. Executive Summary Box
+    takeaways_li = "".join(
+        f'<li style="margin-bottom: 8px; color: #0f172a;">{t}</li>'
+        for t in data.get("executive_takeaways", [])
+    )
+    html.append(
+        f'<div style="background: #f8fafc; border-left: 4px solid #2563eb; border-radius: 0 10px 10px 0; padding: 18px 20px; margin-bottom: 28px; box-shadow: 0 2px 6px rgba(0,0,0,0.04);">'
+        f'<div style="font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; color: #2563eb; margin-bottom: 10px;">Executive Summary &amp; Key Takeaways</div>'
+        f'<ul style="margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.6;">{takeaways_li}</ul>'
+        f'</div>'
+    )
+
+    # 5. Intro Paragraphs
+    for para in data.get("intro_paragraph", "").split("\n\n"):
+        if para.strip():
+            html.append(f'<p style="margin-bottom: 18px; font-size: 16.5px; color: #334155;">{para.strip()}</p>')
+
+    # 6. Disciplined Content Sections
+    sections = data.get("sections", [])
+    for idx, sec in enumerate(sections):
+        html.append(
+            f'<h2 style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 34px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">{sec.get("heading", "")}</h2>'
+            f'<div style="color: #334155; margin-bottom: 20px;">{sec.get("body_html", "")}</div>'
+        )
+        # Insert the mobile-scrollable comparison table right after Section 2
+        if idx == 1 and "table" in data:
+            tbl = data["table"]
+            headers_html = "".join(
+                f'<th style="padding: 12px 14px; text-align: left; background: #0f172a; color: #ffffff; font-size: 13.5px; font-weight: 600; white-space: nowrap;">{h}</th>'
+                for h in tbl.get("headers", [])
+            )
+            rows_html = ""
+            for r_idx, row in enumerate(tbl.get("rows", [])):
+                bg = "#ffffff" if r_idx % 2 == 0 else "#f8fafc"
+                cells = "".join(
+                    f'<td style="padding: 12px 14px; border-bottom: 1px solid #e2e8f0; font-size: 14px; color: #1e293b; min-width: 120px;">{c}</td>'
+                    for c in row
+                )
+                rows_html += f'<tr style="background: {bg};">{cells}</tr>'
+
+            html.append(
+                f'<div style="margin: 30px 0;">'
+                f'<div style="font-size: 14px; font-weight: 700; color: #475569; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">{tbl.get("caption", "Comparative Analysis")}</div>'
+                f'<div style="width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">'
+                f'<table style="width: 100%; border-collapse: collapse; min-width: 520px;">'
+                f'<thead><tr>{headers_html}</tr></thead>'
+                f'<tbody>{rows_html}</tbody>'
+                f'</table></div>'
+                f'<div style="font-size: 12px; color: #64748b; margin-top: 6px; text-align: right;"><em>*Swipe horizontally on mobile to view full metric comparison</em></div>'
+                f'</div>'
+            )
+
+    # 7. Frequently Asked Questions (Clean Card Layout for Mobile & Desktop)
+    if data.get("faqs"):
+        html.append(
+            '<h2 style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 38px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">Frequently Asked Questions</h2>'
+        )
+        for faq in data["faqs"]:
+            html.append(
+                f'<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; margin-bottom: 14px;">'
+                f'<h3 style="margin: 0 0 8px 0; font-size: 16.5px; font-weight: 700; color: #0f172a;">Q: {faq.get("q", "")}</h3>'
+                f'<p style="margin: 0; font-size: 15px; color: #475569;">{faq.get("a", "")}</p>'
+                f'</div>'
+            )
+
+    html.append('</div>')
+    return "\n".join(html)
 
 def main():
     service = get_blogger_service()
@@ -125,19 +263,20 @@ def main():
         print("No new unique trending topics found in this cycle.")
         return
 
-    print(f"Generating article for trend: {topic['headline']}")
-    article = generate_high_cpm_article(topic)
+    print(f"Generating structured article for trend: {topic['headline']}")
+    article_data = generate_structured_article(topic)
+    formatted_html = render_responsive_html(article_data)
 
     body = {
         "kind": "blogger#post",
         "blog": {"id": BLOG_ID},
-        "title": article["seo_title"],
-        "content": article["html_content"],
-        "labels": article["labels"][:5]
+        "title": article_data["seo_title"],
+        "content": formatted_html,
+        "labels": article_data.get("labels", ["Market Analysis"])[:5]
     }
 
     post = service.posts().insert(blogId=BLOG_ID, body=body, isDraft=False).execute()
-    print(f"Successfully published! Live URL: {post.get('url')}")
+    print(f"Successfully published responsive article! Live URL: {post.get('url')}")
 
 if __name__ == "__main__":
     main()
