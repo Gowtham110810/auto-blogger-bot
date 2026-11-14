@@ -14,6 +14,7 @@ from googleapiclient.discovery import build
 import topic_engine
 import research_engine
 import fact_checker
+import seo_engine
 
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 BLOG_ID = os.environ["BLOG_ID"]
