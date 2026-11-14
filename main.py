@@ -2,6 +2,7 @@ import os
 import re
 import json
 import random
+import requests
 import feedparser
 from google import genai
 from google.genai import types
@@ -14,6 +15,7 @@ BLOG_ID = os.environ["BLOG_ID"]
 CLIENT_ID = os.environ["BLOGGER_CLIENT_ID"]
 CLIENT_SECRET = os.environ["BLOGGER_CLIENT_SECRET"]
 REFRESH_TOKEN = os.environ["BLOGGER_REFRESH_TOKEN"]
+DEVTO_API_KEY = os.environ.get("DEVTO_API_KEY", "").strip()
 
 # Unified High-CPM US Tier-1 Feeds (Enterprise AI, FinTech, Markets, Cloud SaaS)
 US_HIGH_CPM_FEEDS = [
@@ -96,6 +98,7 @@ def generate_structured_article(topic_data):
     Based on this trending catalyst: "{topic_data['headline']}"
 
     Produce a high-engagement, analytical guide (~1,000 words) for a US/UK executive and investor audience.
+    Frame the title as a specific, high-search-intent comparison, framework, or cost/ROI breakdown.
     Return ONLY a raw JSON object with this exact schema:
     {{
       "seo_title": "High-CTR, curiosity-driven authoritative title under 64 characters",
@@ -166,9 +169,8 @@ def generate_structured_article(topic_data):
 
     raise last_error
 
-def render_deepsea_interactive_html(data):
+def render_deepsea_interactive_html(data, img_url):
     """Renders a unified Deepsea dark-glassmorphic dashboard layout with animated metric bars."""
-    img_url = random.choice(EDITORIAL_COVERS)
     safe_alt = data["seo_title"].replace('"', '&quot;')
     badge = data.get("category_badge", "MARKET ANALYSIS")
     read_time = data.get("read_time", "4 MIN READ")
@@ -308,7 +310,7 @@ def render_deepsea_interactive_html(data):
             html.append(f'<p style="margin-bottom: 16px; font-size: 16.5px; color: #e2e8f0;">{para.strip()}</p>')
     html.append('</div>')
 
-    # 5. Interactive Visual Analytics Bars (Keeps readers engaged on the page)
+    # 5. Interactive Visual Analytics Bars
     if data.get("visual_metrics"):
         bars_html = ""
         bar_colors = [
@@ -397,6 +399,56 @@ def render_deepsea_interactive_html(data):
     html.append('</div>')
     return "\n".join(html)
 
+def syndicate_to_devto(article_data, live_blog_url, cover_url):
+    """Automatically cross-posts a teaser + canonical link to Dev.to for instant US/UK traffic."""
+    if not DEVTO_API_KEY:
+        print("DEVTO_API_KEY not set in GitHub Secrets; skipping Dev.to syndication.")
+        return
+
+    takeaways_md = "\n".join(f"- {t}" for t in article_data.get("executive_takeaways", []))
+    sections_md = ""
+    for sec in article_data.get("sections", [])[:2]:
+        clean_text = re.sub(r"<[^>]+>", "", sec.get("body_html", ""))
+        sections_md += f"\n\n## {sec.get('heading', '')}\n{clean_text}"
+
+    markdown_body = (
+        f"![Cover]({cover_url})\n\n"
+        f"### Executive Intelligence Summary\n{takeaways_md}\n\n"
+        f"{article_data.get('intro_paragraph', '')}"
+        f"{sections_md}\n\n"
+        f"---\n"
+        f"### 📊 View the Full Interactive Benchmark Matrix & Telemetry\n"
+        f"Read the complete quantitative breakdown, interactive metric bars, and step-by-step execution framework on our primary terminal:\n"
+        f"👉 **[Read the Full Analysis on KeepUpdatedTrend]({live_blog_url})**"
+    )
+
+    clean_tags = [re.sub(r"[^a-z0-9]", "", t.lower())[:20] for t in article_data.get("labels", [])]
+    clean_tags = [t for t in clean_tags if t][:4] or ["ai", "finance", "cloud", "tech"]
+
+    payload = {
+        "article": {
+            "title": article_data["seo_title"],
+            "published": True,
+            "body_markdown": markdown_body,
+            "tags": clean_tags,
+            "canonical_url": live_blog_url
+        }
+    }
+
+    try:
+        resp = requests.post(
+            "https://dev.to/api/articles",
+            headers={"api-key": DEVTO_API_KEY, "Content-Type": "application/json"},
+            json=payload,
+            timeout=20
+        )
+        if resp.status_code in (200, 201):
+            print(f"Successfully syndicated to Dev.to! Live URL: {resp.json().get('url')}")
+        else:
+            print(f"Dev.to syndication returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Dev.to syndication error (non-fatal): {e}")
+
 def main():
     service = get_blogger_service()
     existing_titles = get_existing_titles(service)
@@ -408,7 +460,8 @@ def main():
 
     print(f"Generating Deepsea themed article for trend: {topic['headline']}")
     article_data = generate_structured_article(topic)
-    formatted_html = render_deepsea_interactive_html(article_data)
+    cover_url = random.choice(EDITORIAL_COVERS)
+    formatted_html = render_deepsea_interactive_html(article_data, cover_url)
 
     body = {
         "kind": "blogger#post",
@@ -419,7 +472,11 @@ def main():
     }
 
     post = service.posts().insert(blogId=BLOG_ID, body=body, isDraft=False).execute()
-    print(f"Successfully published Deepsea article! Live URL: {post.get('url')}")
+    live_url = post.get("url")
+    print(f"Successfully published Deepsea article! Live URL: {live_url}")
+
+    # Auto-syndicate to Dev.to for immediate referral traffic
+    syndicate_to_devto(article_data, live_url, cover_url)
 
 if __name__ == "__main__":
     main()
