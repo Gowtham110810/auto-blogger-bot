@@ -75,7 +75,7 @@ def parse_json_safely(raw_text):
     return json.loads(cleaned)
 
 def generate_structured_article(topic_data):
-    """Generates structured JSON data so Python can assemble a uniform, mobile-responsive layout."""
+    """Generates structured JSON data so Python can assemble a uniform, animated layout."""
     client = genai.Client(
         api_key=GEMINI_API_KEY,
         http_options=types.HttpOptions(api_version="v1beta")
@@ -159,97 +159,235 @@ def generate_structured_article(topic_data):
 
     raise last_error
 
-def render_responsive_html(data):
-    """Wraps the structured JSON into a uniform, mobile-first and desktop-optimized HTML template."""
+def render_animated_responsive_html(data):
+    """Wraps the structured JSON into an animated, mobile-first and desktop-optimized theme."""
     img_url = random.choice(EDITORIAL_COVERS)
     safe_alt = data["seo_title"].replace('"', '&quot;')
     badge = data.get("category_badge", "MARKET ANALYSIS")
 
-    # 1. Outer Responsive Wrapper (works identically on mobile & desktop)
-    html = [
-        '<div style="max-width: 820px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; line-height: 1.75; font-size: 16px; box-sizing: border-box;">'
-    ]
+    # 1. Embedded CSS3 Keyframe Animations & Mobile/PC Responsive Rules
+    css_animations = """
+    <style>
+      @keyframes ktFadeUp {
+        0% { opacity: 0; transform: translateY(18px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes ktPulseDot {
+        0%, 100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.7); }
+        50% { transform: scale(1.15); opacity: 0.85; box-shadow: 0 0 0 6px rgba(0, 229, 255, 0); }
+      }
+      @keyframes ktShimmerBorder {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+      .kt-wrap {
+        max-width: 840px;
+        margin: 0 auto;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #1e293b;
+        line-height: 1.75;
+        font-size: 16px;
+        box-sizing: border-box;
+        padding: 4px;
+      }
+      .kt-anim-1 { animation: ktFadeUp 0.55s ease-out 0.05s both; }
+      .kt-anim-2 { animation: ktFadeUp 0.65s ease-out 0.15s both; }
+      .kt-anim-3 { animation: ktFadeUp 0.75s ease-out 0.25s both; }
+      .kt-anim-4 { animation: ktFadeUp 0.85s ease-out 0.35s both; }
+      .kt-cover-box {
+        overflow: hidden;
+        border-radius: 14px;
+        box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.18);
+        margin-bottom: 26px;
+      }
+      .kt-cover-box img {
+        width: 100%;
+        max-width: 840px;
+        height: auto;
+        max-height: 430px;
+        object-fit: cover;
+        display: block;
+        transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .kt-cover-box:hover img {
+        transform: scale(1.03);
+      }
+      .kt-exec-card {
+        background: linear-gradient(135deg, #000814 0%, #001229 100%);
+        color: #f8fafc;
+        border-left: 4px solid #00e5ff;
+        border-radius: 12px;
+        padding: 20px 22px;
+        margin-bottom: 28px;
+        box-shadow: 0 8px 20px rgba(0, 8, 20, 0.16);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+      }
+      .kt-exec-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 12px 28px rgba(0, 229, 255, 0.15);
+      }
+      .kt-section-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 22px 24px;
+        margin-bottom: 24px;
+        box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+        transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+      }
+      .kt-section-card:hover {
+        transform: translateY(-2px);
+        border-color: #38bdf8;
+        box-shadow: 0 8px 22px rgba(41, 98, 255, 0.08);
+      }
+      .kt-table-row {
+        transition: background-color 0.2s ease;
+      }
+      .kt-table-row:hover {
+        background-color: #e0f2fe !important;
+      }
+      .kt-faq-item {
+        background: #f8fafc;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        margin-bottom: 12px;
+        overflow: hidden;
+        transition: border-color 0.25s ease, box-shadow 0.25s ease;
+      }
+      .kt-faq-item:hover {
+        border-color: #2962ff;
+        box-shadow: 0 4px 12px rgba(41, 98, 255, 0.08);
+      }
+      .kt-faq-item summary {
+        padding: 15px 18px;
+        font-size: 16px;
+        font-weight: 700;
+        color: #0f172a;
+        cursor: pointer;
+        list-style: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .kt-faq-item summary::-webkit-details-marker {
+        display: none;
+      }
+      .kt-faq-icon {
+        color: #2962ff;
+        font-weight: 800;
+        font-size: 18px;
+        transition: transform 0.3s ease;
+      }
+      .kt-faq-item[open] .kt-faq-icon {
+        transform: rotate(45deg);
+      }
+      .kt-faq-answer {
+        padding: 0 18px 16px 18px;
+        color: #334155;
+        font-size: 15px;
+        border-top: 1px solid #e2e8f0;
+        padding-top: 12px;
+        animation: ktFadeUp 0.3s ease-out both;
+      }
+      @media (max-width: 640px) {
+        .kt-wrap { font-size: 15.5px; }
+        .kt-section-card { padding: 16px 16px; }
+        .kt-exec-card { padding: 16px 16px; }
+      }
+    </style>
+    """
 
-    # 2. Category Pill Badge
+    html = [css_animations, '<div class="kt-wrap">']
+
+    # 2. Animated Live Category Badge
     html.append(
-        f'<div style="margin-bottom: 12px;">'
-        f'<span style="display: inline-block; background: #0f172a; color: #38bdf8; font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 5px 12px; border-radius: 6px;">{badge}</span>'
+        f'<div class="kt-anim-1" style="margin-bottom: 14px; display: flex; align-items: center; gap: 10px;">'
+        f'<span style="display: inline-flex; align-items: center; gap: 8px; background: #000814; color: #00e5ff; font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 6px 14px; border-radius: 999px; border: 1px solid rgba(0,229,255,0.3);">'
+        f'<span style="width: 8px; height: 8px; background: #10b981; border-radius: 50%; display: inline-block; animation: ktPulseDot 2s infinite;"></span>'
+        f'{badge}'
+        f'</span>'
         f'</div>'
     )
 
-    # 3. Featured Cover Image (Blogger auto-detects this first <img> as the post thumbnail)
+    # 3. Featured Cover Image with Smooth Zoom Hover (Blogger picks this <img> as thumbnail)
     html.append(
-        f'<div class="separator" style="clear: both; text-align: center; margin-bottom: 24px;">'
-        f'<a href="{img_url}" imageanchor="1" style=" display: block;">'
-        f'<img border="0" src="{img_url}" alt="{safe_alt}" title="{safe_alt}" '
-        f'style="width: 100%; max-width: 820px; height: auto; max-height: 420px; object-fit: cover; border-radius: 12px; box-shadow: 0 6px 18px rgba(15,23,42,0.12);" />'
+        f'<div class="separator kt-cover-box kt-anim-1" style="clear: both; text-align: center;">'
+        f'<a href="{img_url}" imageanchor="1" style="display: block; margin: 0;">'
+        f'<img border="0" src="{img_url}" alt="{safe_alt}" title="{safe_alt}" />'
         f'</a></div>'
     )
 
-    # 4. Executive Summary Box
+    # 4. Deepsea Cyber-Slate Executive Summary Card
     takeaways_li = "".join(
-        f'<li style="margin-bottom: 8px; color: #0f172a;">{t}</li>'
+        f'<li style="margin-bottom: 10px; color: #e2e8f0;">{t}</li>'
         for t in data.get("executive_takeaways", [])
     )
     html.append(
-        f'<div style="background: #f8fafc; border-left: 4px solid #2563eb; border-radius: 0 10px 10px 0; padding: 18px 20px; margin-bottom: 28px; box-shadow: 0 2px 6px rgba(0,0,0,0.04);">'
-        f'<div style="font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; color: #2563eb; margin-bottom: 10px;">Executive Summary &amp; Key Takeaways</div>'
-        f'<ul style="margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.6;">{takeaways_li}</ul>'
+        f'<div class="kt-exec-card kt-anim-2">'
+        f'<div style="font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.2px; color: #00e5ff; margin-bottom: 10px;">⚡ Executive Intelligence Summary</div>'
+        f'<ul style="margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.65;">{takeaways_li}</ul>'
         f'</div>'
     )
 
     # 5. Intro Paragraphs
+    html.append('<div class="kt-anim-3">')
     for para in data.get("intro_paragraph", "").split("\n\n"):
         if para.strip():
             html.append(f'<p style="margin-bottom: 18px; font-size: 16.5px; color: #334155;">{para.strip()}</p>')
+    html.append('</div>')
 
-    # 6. Disciplined Content Sections
+    # 6. Disciplined Content Section Cards + Interactive Comparison Table
     sections = data.get("sections", [])
     for idx, sec in enumerate(sections):
         html.append(
-            f'<h2 style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 34px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">{sec.get("heading", "")}</h2>'
-            f'<div style="color: #334155; margin-bottom: 20px;">{sec.get("body_html", "")}</div>'
+            f'<div class="kt-section-card kt-anim-4">'
+            f'<h2 style="font-size: 21px; font-weight: 800; color: #0f172a; margin-top: 0; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">{sec.get("heading", "")}</h2>'
+            f'<div style="color: #334155;">{sec.get("body_html", "")}</div>'
+            f'</div>'
         )
         # Insert the mobile-scrollable comparison table right after Section 2
         if idx == 1 and "table" in data:
             tbl = data["table"]
             headers_html = "".join(
-                f'<th style="padding: 12px 14px; text-align: left; background: #0f172a; color: #ffffff; font-size: 13.5px; font-weight: 600; white-space: nowrap;">{h}</th>'
+                f'<th style="padding: 13px 15px; text-align: left; background: #000814; color: #00e5ff; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; white-space: nowrap;">{h}</th>'
                 for h in tbl.get("headers", [])
             )
             rows_html = ""
             for r_idx, row in enumerate(tbl.get("rows", [])):
                 bg = "#ffffff" if r_idx % 2 == 0 else "#f8fafc"
                 cells = "".join(
-                    f'<td style="padding: 12px 14px; border-bottom: 1px solid #e2e8f0; font-size: 14px; color: #1e293b; min-width: 120px;">{c}</td>'
+                    f'<td style="padding: 12px 15px; border-bottom: 1px solid #e2e8f0; font-size: 14px; color: #1e293b; min-width: 125px;">{c}</td>'
                     for c in row
                 )
-                rows_html += f'<tr style="background: {bg};">{cells}</tr>'
+                rows_html += f'<tr class="kt-table-row" style="background: {bg};">{cells}</tr>'
 
             html.append(
-                f'<div style="margin: 30px 0;">'
-                f'<div style="font-size: 14px; font-weight: 700; color: #475569; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">{tbl.get("caption", "Comparative Analysis")}</div>'
-                f'<div style="width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">'
+                f'<div class="kt-anim-4" style="margin: 30px 0;">'
+                f'<div style="font-size: 13.5px; font-weight: 800; color: #0f172a; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.6px;">📊 {tbl.get("caption", "Comparative Analysis")}</div>'
+                f'<div style="width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 4px 14px rgba(0,8,20,0.06);">'
                 f'<table style="width: 100%; border-collapse: collapse; min-width: 520px;">'
                 f'<thead><tr>{headers_html}</tr></thead>'
                 f'<tbody>{rows_html}</tbody>'
                 f'</table></div>'
-                f'<div style="font-size: 12px; color: #64748b; margin-top: 6px; text-align: right;"><em>*Swipe horizontally on mobile to view full metric comparison</em></div>'
+                f'<div style="font-size: 12px; color: #64748b; margin-top: 6px; text-align: right;"><em>*Swipe horizontally on mobile to inspect all columns</em></div>'
                 f'</div>'
             )
 
-    # 7. Frequently Asked Questions (Clean Card Layout for Mobile & Desktop)
+    # 7. Interactive Animated Accordion FAQs (Zero JS required)
     if data.get("faqs"):
         html.append(
-            '<h2 style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 38px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">Frequently Asked Questions</h2>'
+            '<div class="kt-anim-4" style="margin-top: 36px;">'
+            '<h2 style="font-size: 21px; font-weight: 800; color: #0f172a; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">Frequently Asked Questions</h2>'
         )
         for faq in data["faqs"]:
             html.append(
-                f'<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; margin-bottom: 14px;">'
-                f'<h3 style="margin: 0 0 8px 0; font-size: 16.5px; font-weight: 700; color: #0f172a;">Q: {faq.get("q", "")}</h3>'
-                f'<p style="margin: 0; font-size: 15px; color: #475569;">{faq.get("a", "")}</p>'
-                f'</div>'
+                f'<details class="kt-faq-item">'
+                f'<summary><span>{faq.get("q", "")}</span><span class="kt-faq-icon">+</span></summary>'
+                f'<div class="kt-faq-answer">{faq.get("a", "")}</div>'
+                f'</details>'
             )
+        html.append('</div>')
 
     html.append('</div>')
     return "\n".join(html)
@@ -263,9 +401,9 @@ def main():
         print("No new unique trending topics found in this cycle.")
         return
 
-    print(f"Generating structured article for trend: {topic['headline']}")
+    print(f"Generating animated structured article for trend: {topic['headline']}")
     article_data = generate_structured_article(topic)
-    formatted_html = render_responsive_html(article_data)
+    formatted_html = render_animated_responsive_html(article_data)
 
     body = {
         "kind": "blogger#post",
@@ -276,7 +414,7 @@ def main():
     }
 
     post = service.posts().insert(blogId=BLOG_ID, body=body, isDraft=False).execute()
-    print(f"Successfully published responsive article! Live URL: {post.get('url')}")
+    print(f"Successfully published animated article! Live URL: {post.get('url')}")
 
 if __name__ == "__main__":
     main()
