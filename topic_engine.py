@@ -27,12 +27,44 @@ DISCOVERY_FEEDS = [
     "https://news.google.com/rss/search?q=Cloud+SaaS+Infrastructure+Software+Economics+when:1d&hl=en-US&gl=US&ceid=US:en"
 ]
 
+def generate_json_with_fallback(prompt, temperature=0.25):
+    """Automatically discovers available Gemini models and falls back if one is unavailable."""
+    client = genai.Client(
+        api_key=os.environ["GEMINI_API_KEY"],
+        http_options=types.HttpOptions(api_version="v1beta")
+    )
+    available_models = []
+    for m in client.models.list():
+        name = m.name.replace("models/", "")
+        actions = getattr(m, "supported_actions", []) or []
+        if "gemini" in name and "embedding" not in name and "imagen" not in name and "veo" not in name and "tts" not in name:
+            if not actions or "generateContent" in actions:
+                available_models.append(name)
+    available_models.sort(key=lambda x: (0 if "flash" in x else 1, x), reverse=True)
+
+    last_err = None
+    for model_name in available_models:
+        try:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=temperature
+                )
+            )
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", resp.text.strip(), flags=re.MULTILINE)
+            return json.loads(cleaned)
+        except Exception as e:
+            print(f"[topic_engine] Skipped {model_name}: {e}")
+            last_err = e
+    raise last_err
+
 def init_db():
     """Initializes the shared SQLite tables for the 7-layer architecture."""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # 1. Research Queue & Scored Topics
     cur.execute("""
         CREATE TABLE IF NOT EXISTS topic_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,7 +84,6 @@ def init_db():
         )
     """)
 
-    # 2. Published & Draft Articles Catalogue (for SEO Internal Linking)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS articles_catalogue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +97,6 @@ def init_db():
         )
     """)
 
-    # 3. Claims & Fact-Checking Ledger
     cur.execute("""
         CREATE TABLE IF NOT EXISTS claim_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,7 +110,6 @@ def init_db():
         )
     """)
 
-    # 4. Run History & Gate Logs
     cur.execute("""
         CREATE TABLE IF NOT EXISTS run_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,7 +123,6 @@ def init_db():
     conn.close()
 
 def fetch_gdelt_signals(query="enterprise AI OR fintech OR cloud SaaS"):
-    """Queries the GDELT 2.0 Doc API for emerging global news events."""
     try:
         encoded = urllib.parse.quote(f"({query}) sourcelang:english")
         url = f"https://api.gdeltproject.org/api/v2/doc/doc?query={encoded}&mode=artlist&maxrecords=8&format=json"
@@ -110,7 +138,6 @@ def fetch_gdelt_signals(query="enterprise AI OR fintech OR cloud SaaS"):
     return []
 
 def fetch_autocomplete(seed):
-    """Fetches real search queries from Google US Autocomplete."""
     try:
         encoded = urllib.parse.quote(seed)
         url = f"http://suggestqueries.google.com/complete/search?client=firefox&gl=us&hl=en&q={encoded}"
@@ -123,7 +150,6 @@ def fetch_autocomplete(seed):
     return []
 
 def collect_candidates(existing_titles=None):
-    """Collects, normalizes, and deduplicates candidate topics across RSS, Trends, and GDELT."""
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -165,15 +191,9 @@ def collect_candidates(existing_titles=None):
     return unique_candidates
 
 def score_and_queue_topics(existing_titles=None):
-    """Scores candidates using the roadmap's 6-factor weighted model and queues the best."""
     candidates = collect_candidates(existing_titles)
     if not candidates:
         return None
-
-    client = genai.Client(
-        api_key=os.environ["GEMINI_API_KEY"],
-        http_options=types.HttpOptions(api_version="v1beta")
-    )
 
     prompt = f"""
     You are the Content Intelligence Engine for KeepUpdatedTrend.
@@ -210,17 +230,8 @@ def score_and_queue_topics(existing_titles=None):
     }}
     """
 
-    resp = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.25
-        )
-    )
-
-    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", resp.text.strip(), flags=re.MULTILINE)
-    scored = json.loads(cleaned).get("scored_topics", [])
+    result = generate_json_with_fallback(prompt, temperature=0.25)
+    scored = result.get("scored_topics", [])
     if not scored:
         return None
 
@@ -274,7 +285,3 @@ def score_and_queue_topics(existing_titles=None):
         "reader_question": row[4],
         "weighted_total": row[5]
     }
-
-if __name__ == "__main__":
-    winner = score_and_queue_topics()
-    print("Top Queued Topic:", json.dumps(winner, indent=2))
