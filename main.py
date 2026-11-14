@@ -5,12 +5,10 @@ import random
 import sqlite3
 import requests
 from datetime import datetime, timezone
-from google import genai
-from google.genai import types
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-# Import your 3 P1 Roadmap Modules
+# Import Roadmap Modules (P1 + P2)
 import topic_engine
 import research_engine
 import fact_checker
@@ -80,38 +78,8 @@ def get_existing_titles(service):
     except Exception:
         return []
 
-def get_Internal_links():
-    """Fetches up to 2 related past articles from SQLite for on-page internal linking."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute("SELECT title, url FROM articles_catalogue WHERE publish_state = 'LIVE' ORDER BY id DESC LIMIT 3")
-        rows = cur.fetchall()
-        conn.close()
-        return [{"title": r[0], "url": r[1]} for r in rows if r[0] and r[1]]
-    except Exception:
-        return []
-
-def parse_json_safely(raw_text):
-    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text.strip(), flags=re.MULTILINE)
-    return json.loads(cleaned)
-
 def generate_research_grounded_article(topic_data, research_pack):
     """Drafts an analytical article grounded in the collected Research Pack."""
-    client = genai.Client(
-        api_key=GEMINI_API_KEY,
-        http_options=types.HttpOptions(api_version="v1beta")
-    )
-
-    available_models = []
-    for m in client.models.list():
-        name = m.name.replace("models/", "")
-        actions = getattr(m, "supported_actions", []) or []
-        if "gemini" in name and "embedding" not in name and "imagen" not in name and "veo" not in name:
-            if not actions or "generateContent" in actions:
-                available_models.append(name)
-    available_models.sort(key=lambda x: (0 if "flash" in x else 1, x), reverse=True)
-
     prompt = f"""
     You are a Senior US Institutional Finance & Enterprise Tech Editor for KeepUpdatedTrend.
     Draft a comprehensive, research-grounded analytical guide (~1,000 words) based on:
@@ -176,42 +144,14 @@ def generate_research_grounded_article(topic_data, research_pack):
       ]
     }}
     """
+    return topic_engine.generate_json_with_fallback(prompt, temperature=0.45)
 
-    last_error = None
-    for model_name in available_models:
-        try:
-            print(f"Drafting research-backed article with {model_name}...")
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.45
-                )
-            )
-            return parse_json_safely(response.text)
-        except Exception as e:
-            print(f"Skipped {model_name}: {e}")
-            last_error = e
-    raise last_error
-
-def render_deepsea_interactive_html(data, img_url, references_html="", internal_links=None):
-    """Renders the Deepsea dark-glassmorphic layout with JSON-LD Schema, Internal Links, and Reference Ledger."""
-    safe_alt = data["seo_title"].replace('"', '&quot;')
+def render_deepsea_interactive_html(data, img_url, references_html="", internal_links=None, schema_html=""):
+    """Renders the Deepsea dark-glassmorphic layout with validated JSON-LD Schema, Internal Links, and Reference Ledger."""
+    safe_alt = f"{data['seo_title']} - {data.get('category_badge', 'Analysis')}".replace('"', '&quot;')
     badge = data.get("category_badge", "MARKET ANALYSIS")
     read_time = data.get("read_time", "5 MIN READ")
     impact_score = data.get("impact_score", "VERIFIED RESEARCH")
-
-    # JSON-LD Article Schema for Google Search
-    schema_ld = {
-        "@context": "https://schema.org",
-        "@type": "Article",
-        "headline": data["seo_title"],
-        "description": data.get("meta_description", ""),
-        "image": [img_url],
-        "author": {"@type": "Organization", "name": "KeepUpdatedTrend Research"},
-        "publisher": {"@type": "Organization", "name": "KeepUpdatedTrend"}
-    }
 
     css_styles = """
     <style>
@@ -297,7 +237,7 @@ def render_deepsea_interactive_html(data, img_url, references_html="", internal_
     """
 
     html = [
-        f'<script type="application/ld+json">{json.dumps(schema_ld)}</script>',
+        schema_html,
         css_styles,
         '<div class="ds-shell">'
     ]
@@ -404,10 +344,10 @@ def render_deepsea_interactive_html(data, img_url, references_html="", internal_
                 f'</div>'
             )
 
-    # 7. Internal Links Card (If previous posts exist in SQLite)
+    # 7. Pillar-Matched Internal Links Card (Powered by seo_engine.py)
     if internal_links:
         links_li = "".join(
-            f'<li style="margin-bottom: 8px;"><a href="{ item["url"] }" style="color: #00e5ff; font-weight: 600; text-decoration: underline;">{ item["title"] }</a></li>'
+            f'<li style="margin-bottom: 8px;"><a href="{item["url"]}" style="color: #00e5ff; font-weight: 600; text-decoration: underline;">{item["title"]}</a></li>'
             for item in internal_links
         )
         html.append(
@@ -516,15 +456,23 @@ def main():
         draft_data, research_pack, queue_id=topic.get("queue_id", 0)
     )
     references_html = fact_checker.render_references_html(verified_data)
-    internal_links = get_Internal_links()
+
+    # Stage 4.5: On-Page SEO, Internal Linking & Schema Validation (seo_engine.py)
+    print("Stage 4.5: Running seo_engine.py optimization & schema validation...")
+    cover_url = random.choice(EDITORIAL_COVERS)
+    seo_package = seo_engine.audit_onpage_seo(verified_data, topic, cover_url)
+    verified_data = seo_package["article_data"]
 
     # Stage 5: Render & Publish
-    cover_url = random.choice(EDITORIAL_COVERS)
     formatted_html = render_deepsea_interactive_html(
-        verified_data, cover_url, references_html=references_html, internal_links=internal_links
+        verified_data,
+        cover_url,
+        references_html=references_html,
+        internal_links=seo_package["internal_links"],
+        schema_html=seo_package["schema_html"]
     )
 
-    is_draft = not verified_data.get("gate_passed", True)
+    is_draft = not (verified_data.get("gate_passed", True) and seo_package.get("seo_passed", True))
     body = {
         "kind": "blogger#post",
         "blog": {"id": BLOG_ID},
@@ -551,7 +499,7 @@ def main():
     """, (
         verified_data["seo_title"],
         live_url,
-        re.sub(r"[^a-z0-9]+", "-", verified_data["seo_title"].lower()).strip("-"),
+        verified_data.get("slug", ""),
         topic.get("pillar", "Enterprise AI"),
         topic.get("primary_keyword", ""),
         state_label,
