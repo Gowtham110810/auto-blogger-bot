@@ -2,7 +2,8 @@ name: Automated High-CPM Blogger Publisher
 
 on:
   schedule:
-    - cron: '0 13,21 * * *'
+    # Runs 3 times daily: 08:00 UTC (1:30 PM IST), 13:00 UTC (6:30 PM IST), 20:00 UTC (1:30 AM IST)
+    - cron: '0 8,13,20 * * *'
   workflow_dispatch:
 
 jobs:
