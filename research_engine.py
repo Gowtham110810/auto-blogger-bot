@@ -7,13 +7,11 @@ import xml.etree.ElementTree as ET
 import requests
 import feedparser
 from datetime import datetime, timezone
-from google import genai
-from google.genai import types
+from topic_engine import generate_json_with_fallback
 
 DB_PATH = "keepupdatedtrend.db"
 
 def fetch_authoritative_rss(keyword):
-    """Collects reporting and official institutional releases from targeted search feeds."""
     sources = []
     queries = [
         f"{keyword} (site:sec.gov OR site:federalreserve.gov OR site:treasury.gov OR site:nist.gov)",
@@ -34,7 +32,6 @@ def fetch_authoritative_rss(keyword):
     return sources
 
 def fetch_arxiv_papers(keyword):
-    """Queries the official arXiv API for technical/quant research (flagged as preprints)."""
     papers = []
     try:
         clean_kw = urllib.parse.quote(re.sub(r"[^a-zA-Z0-9\s]", "", keyword))
@@ -59,14 +56,8 @@ def fetch_arxiv_papers(keyword):
     return papers
 
 def build_research_pack(topic_data):
-    """Collects sources and extracts structured, verifiable claims for the drafting engine."""
     keyword = topic_data.get("primary_keyword") or topic_data.get("headline", "")
     raw_sources = fetch_authoritative_rss(keyword) + fetch_arxiv_papers(keyword)
-
-    client = genai.Client(
-        api_key=os.environ["GEMINI_API_KEY"],
-        http_options=types.HttpOptions(api_version="v1beta")
-    )
 
     prompt = f"""
     You are the Senior Research Analyst for KeepUpdatedTrend.
@@ -99,19 +90,9 @@ def build_research_pack(topic_data):
     }}
     """
 
-    resp = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.2
-        )
-    )
-    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", resp.text.strip(), flags=re.MULTILINE)
-    research_pack = json.loads(cleaned)
+    research_pack = generate_json_with_fallback(prompt, temperature=0.2)
     research_pack["raw_sources"] = raw_sources
 
-    # Store extracted claims in SQLite
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     now = datetime.now(timezone.utc).isoformat()
