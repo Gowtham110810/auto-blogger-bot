@@ -2,14 +2,19 @@ import os
 import re
 import json
 import random
+import sqlite3
 import requests
-import feedparser
+from datetime import datetime, timezone
 from google import genai
 from google.genai import types
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-# 1. Load Secrets from GitHub Environment
+# Import your 3 P1 Roadmap Modules
+import topic_engine
+import research_engine
+import fact_checker
+
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 BLOG_ID = os.environ["BLOG_ID"]
 CLIENT_ID = os.environ["BLOGGER_CLIENT_ID"]
@@ -17,14 +22,8 @@ CLIENT_SECRET = os.environ["BLOGGER_CLIENT_SECRET"]
 REFRESH_TOKEN = os.environ["BLOGGER_REFRESH_TOKEN"]
 DEVTO_API_KEY = os.environ.get("DEVTO_API_KEY", "").strip()
 
-# Unified High-CPM US Tier-1 Feeds (Enterprise AI, FinTech, Markets, Cloud SaaS)
-US_HIGH_CPM_FEEDS = [
-    "https://news.google.com/rss/search?q=AI+Enterprise+Software+SaaS+when:1d&hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss/search?q=S%26P+500+ETF+Institutional+Investing+Market+when:1d&hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss/search?q=Cloud+Infrastructure+Cybersecurity+FinTech+when:1d&hl=en-US&gl=US&ceid=US:en"
-]
+DB_PATH = "keepupdatedtrend.db"
 
-# Curated high-contrast dark cyber/finance/tech editorial covers
 EDITORIAL_COVERS = [
     "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=1200&q=80",
     "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=80",
@@ -36,8 +35,33 @@ EDITORIAL_COVERS = [
     "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=1200&q=80"
 ]
 
+def ensure_valid_sqlite_db():
+    """Replaces manually created text placeholders with a valid binary SQLite database."""
+    if os.path.exists(DB_PATH):
+        try:
+            with open(DB_PATH, "rb") as f:
+                header = f.read(16)
+            if header and not header.startswith(b"SQLite format 3"):
+                os.remove(DB_PATH)
+        except Exception:
+            pass
+    topic_engine.init_db()
+
+def log_stage(stage, status, details=""):
+    """Records pipeline execution milestones in SQLite run_history."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO run_history (stage, status, details, logged_at) VALUES (?, ?, ?, ?)",
+            (stage, status, details[:500], datetime.now(timezone.utc).isoformat())
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
 def get_blogger_service():
-    """Authenticates with Blogger API v3 headlessly using the Refresh Token."""
     creds = Credentials(
         token=None,
         refresh_token=REFRESH_TOKEN,
@@ -49,35 +73,30 @@ def get_blogger_service():
     return build("blogger", "v3", credentials=creds)
 
 def get_existing_titles(service):
-    """Fetches recent blog post titles to avoid publishing duplicates."""
     try:
         posts = service.posts().list(blogId=BLOG_ID, maxResults=30).execute()
         return [item["title"].lower() for item in posts.get("items", [])]
     except Exception:
         return []
 
-def fetch_trending_topic(existing_titles):
-    """Picks a fresh US trending topic with multi-source context."""
-    feed_url = random.choice(US_HIGH_CPM_FEEDS)
-    feed = feedparser.parse(feed_url)
-    
-    for entry in feed.entries[:12]:
-        clean_title = entry.title.rsplit(" - ", 1)[0]
-        if not any(clean_title[:25].lower() in t for t in existing_titles):
-            return {
-                "headline": clean_title,
-                "source": entry.get("source", {}).get("title", "US Market Report"),
-                "published": entry.get("published", "")
-            }
-    return None
+def get_Internal_links():
+    """Fetches up to 2 related past articles from SQLite for on-page internal linking."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT title, url FROM articles_catalogue WHERE publish_state = 'LIVE' ORDER BY id DESC LIMIT 3")
+        rows = cur.fetchall()
+        conn.close()
+        return [{"title": r[0], "url": r[1]} for r in rows if r[0] and r[1]]
+    except Exception:
+        return []
 
 def parse_json_safely(raw_text):
-    """Strips markdown fences if present and parses JSON."""
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text.strip(), flags=re.MULTILINE)
     return json.loads(cleaned)
 
-def generate_structured_article(topic_data):
-    """Generates structured JSON data with visual chart metrics for high user engagement."""
+def generate_research_grounded_article(topic_data, research_pack):
+    """Drafts an analytical article grounded in the collected Research Pack."""
     client = genai.Client(
         api_key=GEMINI_API_KEY,
         http_options=types.HttpOptions(api_version="v1beta")
@@ -90,62 +109,69 @@ def generate_structured_article(topic_data):
         if "gemini" in name and "embedding" not in name and "imagen" not in name and "veo" not in name:
             if not actions or "generateContent" in actions:
                 available_models.append(name)
-
     available_models.sort(key=lambda x: (0 if "flash" in x else 1, x), reverse=True)
 
     prompt = f"""
-    You are a Senior US Institutional Finance & Enterprise Tech Editor.
-    Based on this trending catalyst: "{topic_data['headline']}"
+    You are a Senior US Institutional Finance & Enterprise Tech Editor for KeepUpdatedTrend.
+    Draft a comprehensive, research-grounded analytical guide (~1,000 words) based on:
+    - Target Headline: "{topic_data.get('headline')}"
+    - Primary Search Keyword: "{topic_data.get('primary_keyword')}"
+    - Content Pillar: "{topic_data.get('pillar')}"
+    - Core Reader Question: "{topic_data.get('reader_question')}"
 
-    Produce a high-engagement, analytical guide (~1,000 words) for a US/UK executive and investor audience.
-    Frame the title as a specific, high-search-intent comparison, framework, or cost/ROI breakdown.
-    Return ONLY a raw JSON object with this exact schema:
+    Verified Research Pack & Claims:
+    {json.dumps(research_pack, indent=2)}
+
+    Requirements:
+    - Include original comparisons, transparent evaluation criteria, and explicit risk/limitation analysis.
+    - Clearly distinguish between verified facts, illustrative calculations, and forecasts.
+    - Return ONLY raw JSON matching this exact schema:
     {{
-      "seo_title": "High-CTR, curiosity-driven authoritative title under 64 characters",
+      "seo_title": "High-CTR, search-intent title under 64 characters incorporating the primary keyword",
+      "meta_description": "Clear 150-character summary answering the reader question without keyword stuffing",
       "category_badge": "One of: ENTERPRISE AI | WALL STREET STRATEGY | CLOUD & SAAS | FINTECH INTEL",
-      "read_time": "4 MIN READ",
-      "impact_score": "HIGH IMPACT (9.2/10)",
-      "labels": ["Tag1", "Tag2", "Tag3"],
+      "read_time": "5 MIN READ",
+      "impact_score": "VERIFIED RESEARCH",
+      "labels": ["{topic_data.get('pillar', 'Market Analysis')}", "US Markets", "Enterprise Tech"],
       "executive_takeaways": [
-        "Takeaway 1 (1 concise sentence with a concrete metric or mechanism)",
-        "Takeaway 2 (1 concise sentence)",
-        "Takeaway 3 (1 concise sentence)"
+        "Takeaway 1 grounded in research pack",
+        "Takeaway 2 grounded in research pack",
+        "Takeaway 3 grounded in research pack"
       ],
       "visual_metrics": [
-        {{"label": "Institutional Adoption Velocity", "percent": 86, "display_value": "86% YoY Growth"}},
-        {{"label": "Projected ROI / Margin Efficiency", "percent": 74, "display_value": "+74% Efficiency"}},
-        {{"label": "Enterprise Risk & Volatility Index", "percent": 42, "display_value": "42% Moderate Risk"}}
+        {{"label": "Metric 1 Name", "percent": 82, "display_value": "82% Benchmark"}},
+        {{"label": "Metric 2 Name", "percent": 68, "display_value": "+68% Efficiency"}},
+        {{"label": "Risk / Volatility Exposure", "percent": 40, "display_value": "40% Moderate"}}
       ],
-      "intro_paragraph": "Strong 2-paragraph opening establishing the market catalyst and why it matters now (plain text, separated by \\n\\n).",
+      "intro_paragraph": "Strong 2-paragraph opening answering the reader question directly (separated by \\n\\n).",
       "sections": [
         {{
-          "heading": "1. Core Catalyst & Market Architecture",
-          "body_html": "<p>Detailed analysis...</p><p>Second paragraph...</p>"
+          "heading": "1. Core Catalyst & Architecture Breakdown",
+          "body_html": "<p>Detailed evidence-backed analysis...</p><p>Second paragraph...</p>"
         }},
         {{
-          "heading": "2. Financial & Operational Breakdown",
-          "body_html": "<p>Detailed analysis...</p><ul><li><strong>Primary Driver:</strong> Explanation...</li><li><strong>Risk Vector:</strong> Explanation...</li></ul>"
+          "heading": "2. Quantitative Comparison & Operational Impact",
+          "body_html": "<p>Detailed analysis...</p><ul><li><strong>Primary Driver:</strong> Explanation...</li><li><strong>Key Limitation / Risk:</strong> Explanation...</li></ul>"
         }},
         {{
-          "heading": "3. Actionable Execution Blueprint",
-          "body_html": "<p>Step-by-step actionable blueprint for decision-makers...</p>"
+          "heading": "3. Decision-Maker Execution Blueprint",
+          "body_html": "<p>Practical step-by-step implementation framework...</p>"
         }}
       ],
       "table": {{
-        "caption": "Comparative Benchmark & Metric Breakdown",
-        "headers": ["Metric / Option", "Legacy Baseline", "Optimized Strategy", "Net Impact"],
+        "caption": "Comparative Evaluation Matrix",
+        "headers": ["Evaluation Criterion", "Legacy Baseline", "Modern Architecture", "Net Operational Impact"],
         "rows": [
-          ["Row 1 Col 1", "Row 1 Col 2", "Row 1 Col 3", "Row 1 Col 4"],
-          ["Row 2 Col 1", "Row 2 Col 2", "Row 2 Col 3", "Row 2 Col 4"],
-          ["Row 3 Col 1", "Row 3 Col 2", "Row 3 Col 3", "Row 3 Col 4"],
-          ["Row 4 Col 1", "Row 4 Col 2", "Row 4 Col 3", "Row 4 Col 4"]
+          ["Criterion 1", "Baseline 1", "Modern 1", "Impact 1"],
+          ["Criterion 2", "Baseline 2", "Modern 2", "Impact 2"],
+          ["Criterion 3", "Baseline 3", "Modern 3", "Impact 3"],
+          ["Risk Profile", "High Overhead", "Managed Controls", "Audited Compliance"]
         ]
       }},
       "faqs": [
-        {{"q": "Specific high-intent question 1?", "a": "Direct, authoritative 2-3 sentence answer."}},
-        {{"q": "Specific high-intent question 2?", "a": "Direct, authoritative 2-3 sentence answer."}},
-        {{"q": "Specific high-intent question 3?", "a": "Direct, authoritative 2-3 sentence answer."}},
-        {{"q": "Specific high-intent question 4?", "a": "Direct, authoritative 2-3 sentence answer."}}
+        {{"q": "High-intent reader question 1?", "a": "Direct, authoritative 2-3 sentence answer."}},
+        {{"q": "High-intent reader question 2?", "a": "Direct, authoritative 2-3 sentence answer."}},
+        {{"q": "High-intent reader question 3?", "a": "Direct, authoritative 2-3 sentence answer."}}
       ]
     }}
     """
@@ -153,28 +179,38 @@ def generate_structured_article(topic_data):
     last_error = None
     for model_name in available_models:
         try:
-            print(f"Generating structured article with {model_name}...")
+            print(f"Drafting research-backed article with {model_name}...")
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    temperature=0.65
+                    temperature=0.45
                 )
             )
             return parse_json_safely(response.text)
         except Exception as e:
             print(f"Skipped {model_name}: {e}")
             last_error = e
-
     raise last_error
 
-def render_deepsea_interactive_html(data, img_url):
-    """Renders a unified Deepsea dark-glassmorphic dashboard layout with animated metric bars."""
+def render_deepsea_interactive_html(data, img_url, references_html="", internal_links=None):
+    """Renders the Deepsea dark-glassmorphic layout with JSON-LD Schema, Internal Links, and Reference Ledger."""
     safe_alt = data["seo_title"].replace('"', '&quot;')
     badge = data.get("category_badge", "MARKET ANALYSIS")
-    read_time = data.get("read_time", "4 MIN READ")
-    impact_score = data.get("impact_score", "HIGH IMPACT")
+    read_time = data.get("read_time", "5 MIN READ")
+    impact_score = data.get("impact_score", "VERIFIED RESEARCH")
+
+    # JSON-LD Article Schema for Google Search
+    schema_ld = {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": data["seo_title"],
+        "description": data.get("meta_description", ""),
+        "image": [img_url],
+        "author": {"@type": "Organization", "name": "KeepUpdatedTrend Research"},
+        "publisher": {"@type": "Organization", "name": "KeepUpdatedTrend"}
+    }
 
     css_styles = """
     <style>
@@ -217,12 +253,8 @@ def render_deepsea_interactive_html(data, img_url):
         border-color: #00e5ff;
         box-shadow: 0 10px 28px rgba(0, 229, 255, 0.14);
       }
-      .ds-card p, .ds-card li {
-        color: #cbd5e1 !important;
-      }
-      .ds-card strong {
-        color: #00e5ff !important;
-      }
+      .ds-card p, .ds-card li { color: #cbd5e1 !important; }
+      .ds-card strong { color: #00e5ff !important; }
       .ds-cover {
         overflow: hidden;
         border-radius: 14px;
@@ -237,19 +269,13 @@ def render_deepsea_interactive_html(data, img_url):
         display: block;
         transition: transform 0.55s ease;
       }
-      .ds-cover:hover img {
-        transform: scale(1.04);
-      }
+      .ds-cover:hover img { transform: scale(1.04); }
       .ds-faq {
         background: #001229;
         border: 1px solid rgba(41, 98, 255, 0.35);
         border-radius: 12px;
         margin-bottom: 12px;
         overflow: hidden;
-        transition: border-color 0.25s ease;
-      }
-      .ds-faq:hover {
-        border-color: #00e5ff;
       }
       .ds-faq summary {
         padding: 16px 20px;
@@ -269,9 +295,13 @@ def render_deepsea_interactive_html(data, img_url):
     </style>
     """
 
-    html = [css_styles, '<div class="ds-shell">']
+    html = [
+        f'<script type="application/ld+json">{json.dumps(schema_ld)}</script>',
+        css_styles,
+        '<div class="ds-shell">'
+    ]
 
-    # 1. Top Status Bar (Badge + Read Time + Market Impact Score)
+    # 1. Top Status Bar
     html.append(
         f'<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 16px;">'
         f'<span style="display: inline-flex; align-items: center; gap: 8px; background: rgba(0, 229, 255, 0.12); color: #00e5ff; font-size: 12px; font-weight: 800; letter-spacing: 1px; padding: 6px 14px; border-radius: 999px; border: 1px solid rgba(0, 229, 255, 0.4);">'
@@ -279,11 +309,11 @@ def render_deepsea_interactive_html(data, img_url):
         f'{badge}</span>'
         f'<div style="display: flex; gap: 8px; font-size: 11.5px; font-weight: 700;">'
         f'<span style="background: #001229; color: #94a3b8; padding: 5px 11px; border-radius: 6px; border: 1px solid #1e293b;">⏱ {read_time}</span>'
-        f'<span style="background: rgba(16, 185, 129, 0.15); color: #10b981; padding: 5px 11px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.35);">⚡ {impact_score}</span>'
+        f'<span style="background: rgba(16, 185, 129, 0.15); color: #10b981; padding: 5px 11px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.35);">✓ {impact_score}</span>'
         f'</div></div>'
     )
 
-    # 2. Featured Cover Image (First <img> automatically becomes Blogger's Homepage Card Thumbnail)
+    # 2. Featured Cover Image
     html.append(
         f'<div class="separator ds-cover" style="clear: both; text-align: center;">'
         f'<a href="{img_url}" imageanchor="1" style="display: block; margin: 0;">'
@@ -310,7 +340,7 @@ def render_deepsea_interactive_html(data, img_url):
             html.append(f'<p style="margin-bottom: 16px; font-size: 16.5px; color: #e2e8f0;">{para.strip()}</p>')
     html.append('</div>')
 
-    # 5. Interactive Visual Analytics Bars
+    # 5. Visual Analytics Bars
     if data.get("visual_metrics"):
         bars_html = ""
         bar_colors = [
@@ -373,7 +403,24 @@ def render_deepsea_interactive_html(data, img_url):
                 f'</div>'
             )
 
-    # 7. Interactive FAQ Accordions
+    # 7. Internal Links Card (If previous posts exist in SQLite)
+    if internal_links:
+        links_li = "".join(
+            f'<li style="margin-bottom: 8px;"><a href="{ item["url"] }" style="color: #00e5ff; font-weight: 600; text-decoration: underline;">{ item["title"] }</a></li>'
+            for item in internal_links
+        )
+        html.append(
+            f'<div class="ds-card" style="border-left: 3px solid #2962ff;">'
+            f'<div style="font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #00e5ff; margin-bottom: 10px;">🔗 Related KeepUpdatedTrend Briefings</div>'
+            f'<ul style="margin: 0; padding-left: 18px;">{links_li}</ul>'
+            f'</div>'
+        )
+
+    # 8. Authoritative References & Fact-Checking Ledger
+    if references_html:
+        html.append(references_html)
+
+    # 9. Interactive FAQ Accordions
     if data.get("faqs"):
         html.append(
             '<div style="margin-top: 32px;">'
@@ -388,23 +435,18 @@ def render_deepsea_interactive_html(data, img_url):
             )
         html.append('</div>')
 
-    # 8. Bottom Engagement / Bookmark CTA Banner
+    # 10. Bottom Engagement Banner
     html.append(
         '<div style="margin-top: 30px; background: linear-gradient(135deg, #2962ff 0%, #001229 100%); border: 1px solid #00e5ff; border-radius: 14px; padding: 20px; text-align: center;">'
         '<div style="font-size: 16px; font-weight: 800; color: #ffffff; margin-bottom: 6px;">Stay Ahead of Institutional Market Shifts</div>'
-        '<div style="font-size: 13.5px; color: #cbd5e1;">Bookmark this terminal for thrice-daily US Enterprise AI, SaaS &amp; ETF breakdowns.</div>'
-        '</div>'
+        '<div style="font-size: 13.5px; color: #cbd5e1;">Bookmark this terminal for research-verified US Enterprise AI, SaaS &amp; ETF breakdowns.</div>'
+        '</div></div>'
     )
-
-    html.append('</div>')
     return "\n".join(html)
 
 def syndicate_to_devto(article_data, live_blog_url, cover_url):
-    """Automatically cross-posts a teaser + canonical link to Dev.to for instant US/UK traffic."""
     if not DEVTO_API_KEY:
-        print("DEVTO_API_KEY not set in GitHub Secrets; skipping Dev.to syndication.")
         return
-
     takeaways_md = "\n".join(f"- {t}" for t in article_data.get("executive_takeaways", []))
     sections_md = ""
     for sec in article_data.get("sections", [])[:2]:
@@ -417,8 +459,7 @@ def syndicate_to_devto(article_data, live_blog_url, cover_url):
         f"{article_data.get('intro_paragraph', '')}"
         f"{sections_md}\n\n"
         f"---\n"
-        f"### 📊 View the Full Interactive Benchmark Matrix & Telemetry\n"
-        f"Read the complete quantitative breakdown, interactive metric bars, and step-by-step execution framework on our primary terminal:\n"
+        f"### 📊 View the Full Interactive Benchmark Matrix & Verification Ledger\n"
         f"👉 **[Read the Full Analysis on KeepUpdatedTrend]({live_blog_url})**"
     )
 
@@ -434,7 +475,6 @@ def syndicate_to_devto(article_data, live_blog_url, cover_url):
             "canonical_url": live_blog_url
         }
     }
-
     try:
         resp = requests.post(
             "https://dev.to/api/articles",
@@ -442,41 +482,86 @@ def syndicate_to_devto(article_data, live_blog_url, cover_url):
             json=payload,
             timeout=20
         )
-        if resp.status_code in (200, 201):
-            print(f"Successfully syndicated to Dev.to! Live URL: {resp.json().get('url')}")
-        else:
-            print(f"Dev.to syndication returned {resp.status_code}: {resp.text}")
+        print(f"Dev.to status: {resp.status_code}")
     except Exception as e:
-        print(f"Dev.to syndication error (non-fatal): {e}")
+        print(f"Dev.to syndication skipped: {e}")
 
 def main():
+    ensure_valid_sqlite_db()
     service = get_blogger_service()
     existing_titles = get_existing_titles(service)
-    
-    topic = fetch_trending_topic(existing_titles)
+
+    # Stage 1: Topic Discovery & Scoring (topic_engine.py)
+    print("Stage 1: Scoring candidate topics via topic_engine.py...")
+    topic = topic_engine.score_and_queue_topics(existing_titles)
     if not topic:
+        log_stage("discover", "skipped", "No unique topics found")
         print("No new unique trending topics found in this cycle.")
         return
+    log_stage("discover", "passed", f"Selected: {topic['primary_keyword']} ({topic['weighted_total']})")
 
-    print(f"Generating Deepsea themed article for trend: {topic['headline']}")
-    article_data = generate_structured_article(topic)
+    # Stage 2: Authoritative Research Collection (research_engine.py)
+    print(f"Stage 2: Building research pack for '{topic['primary_keyword']}'...")
+    research_pack = research_engine.build_research_pack(topic)
+    log_stage("research", "passed", f"Extracted {len(research_pack.get('claims', []))} claims")
+
+    # Stage 3: Research-Grounded Drafting
+    print("Stage 3: Drafting article grounded in research pack...")
+    draft_data = generate_research_grounded_article(topic, research_pack)
+
+    # Stage 4: Fact-Checking & Verification Gate (fact_checker.py)
+    print("Stage 4: Running fact_checker.py verification gate...")
+    verified_data = fact_checker.verify_and_refine_article(
+        draft_data, research_pack, queue_id=topic.get("queue_id", 0)
+    )
+    references_html = fact_checker.render_references_html(verified_data)
+    internal_links = get_Internal_links()
+
+    # Stage 5: Render & Publish
     cover_url = random.choice(EDITORIAL_COVERS)
-    formatted_html = render_deepsea_interactive_html(article_data, cover_url)
+    formatted_html = render_deepsea_interactive_html(
+        verified_data, cover_url, references_html=references_html, internal_links=internal_links
+    )
 
+    is_draft = not verified_data.get("gate_passed", True)
     body = {
         "kind": "blogger#post",
         "blog": {"id": BLOG_ID},
-        "title": article_data["seo_title"],
+        "title": verified_data["seo_title"],
         "content": formatted_html,
-        "labels": article_data.get("labels", ["Market Analysis"])[:5]
+        "labels": verified_data.get("labels", ["Market Analysis"])[:5]
     }
 
-    post = service.posts().insert(blogId=BLOG_ID, body=body, isDraft=False).execute()
-    live_url = post.get("url")
-    print(f"Successfully published Deepsea article! Live URL: {live_url}")
+    post = service.posts().insert(blogId=BLOG_ID, body=body, isDraft=is_draft).execute()
+    live_url = post.get("url", "")
+    state_label = "DRAFT_REVIEW" if is_draft else "LIVE"
+    print(f"Successfully published ({state_label})! URL: {live_url}")
 
-    # Auto-syndicate to Dev.to for immediate referral traffic
-    syndicate_to_devto(article_data, live_url, cover_url)
+    # Record in SQLite Catalogue & Mark Topic Completed
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE topic_queue SET status = 'published' WHERE id = ?",
+        (topic.get("queue_id", 0),)
+    )
+    cur.execute("""
+        INSERT OR IGNORE INTO articles_catalogue (title, url, slug, pillar, primary_keyword, publish_state, published_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        verified_data["seo_title"],
+        live_url,
+        re.sub(r"[^a-z0-9]+", "-", verified_data["seo_title"].lower()).strip("-"),
+        topic.get("pillar", "Enterprise AI"),
+        topic.get("primary_keyword", ""),
+        state_label,
+        datetime.now(timezone.utc).isoformat()
+    ))
+    conn.commit()
+    conn.close()
+    log_stage("publish", state_label, live_url)
+
+    if not is_draft and live_url:
+        syndicate_to_devto(verified_data, live_url, cover_url)
 
 if __name__ == "__main__":
     main()
