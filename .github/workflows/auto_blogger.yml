@@ -2,7 +2,7 @@ name: Auto Publish High-CPM US Blog
 
 on:
   schedule:
-    - cron: '0 8,13,20 * * *'
+    - cron: '0 2,10,18 * * *'
   workflow_dispatch:
 
 permissions:
