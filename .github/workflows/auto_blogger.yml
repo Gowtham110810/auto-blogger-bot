@@ -2,7 +2,12 @@ name: Auto Publish High-CPM US Blog
 
 on:
   schedule:
-    - cron: '0 2,10,18 * * *'
+    # 8:30 AM EST (7:00 PM IST) -> 13:30 UTC
+    - cron: '30 13 * * *'
+    # 12:30 PM EST (11:00 PM IST) -> 17:30 UTC
+    - cron: '30 17 * * *'
+    # 4:30 PM EST (3:00 AM IST next day) -> 21:30 UTC
+    - cron: '30 21 * * *'
   workflow_dispatch:
 
 permissions:
